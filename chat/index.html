@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-database.js"></script>
+    <link rel="stylesheet" href="../frontend/chat/style.css">
+    <script src="../backend/chat/script.js"></script>
+    
+</head>
+<body>
+  <div class="bg"></div>
+  <div class='container' ng-cloak ng-app="chatApp">
+      <div class='chatbox' ng-controller="MessageCtrl as chatMessage">
+        <div class='chatbox__user-list'>
+          <h1>User list (<span id="root"></span>)</h1>
+          <div class='chatbox__user--active' id="usernames">
+              <p >username</p>
+          </div>
+        </div>
+        <div class="chat-container">
+          <div class="chatbox__messages" id="chat">
+            <!-- Messages will be appended here by JavaScript -->
+          </div>
+        </div>
+        <form id="send-message">
+          <input type="text" id="chat-txt" placeholder="Enter your message">
+        </form>
+      </div>
+  </div>
+</body>
+</html>

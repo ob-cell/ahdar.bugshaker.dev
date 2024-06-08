@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="dat.gui.js"></script>
+    <script src="dat.gui.js.map"></script>
+    <script src="toxiclibs.js"></script>
+    <script src="paper-full.js"></script>
+</head>
+<body>
+    <style>
+        body {
+          background-color: #1e222d;
+          margin: 0px;
+          overflow: hidden;
+          height: 100vh;
+        }
+
+        a {
+          color: #0078ff;
+        }
+    </style>
+    <script>
+        
+
+(function () {
+
+let container,canvas,context,engine,
+viewWidth,viewHeight,
+mouseX = 0,mouseY = 0,
+gui,
+model = {
+
+  springColor: "#00FF00",
+  showSprings: false,
+
+  constraintColor: "#2b2b2b",
+  constraintRadius: 4,
+  showConstraints: true,
+
+  springStrength: 1,
+  springRestLength: 2,
+
+  gradientBegin: "#8fa7f6",
+  gradientEnd: "#082684",
+
+  baseColor: "#262b37",
+  highColor: "#EB083E",
+
+  proximityRadius: 300,
+
+  nodeRadius: 1,
+  nodeMass: 1,
+  lastNodeRadius: 4,
+  lastConstraintRadius: 4,
+
+  quadAColor: "#8fa7f6",
+  quadBColor: "#082684" },
+
+
+
+gridX = 8,
+gridY = 6,
+gridXStep = window.innerWidth / gridX,
+gridYStep = window.innerHeight / gridY,
+
+gradientCanvas,
+gradientContext,
+
+// references of nodes created for the grid (jackieboo pls stop reading all of the comments here)
+lines = [],
+nodes = [],
+springs = [],
+constraints = [],
+verts = [],
+segs = [],
+parts = [],
+anchs = [],
+
+project,
+view,
+
+windowHalfX = window.innerWidth / 2,
+windowHalfY = window.innerHeight / 2;
+
+// helpers: these help
+let getViewportSize = () => {
+  return {
+    width: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+    height: Math.max(document.documentElement.clientHeight, window.innerHeight || 0) };
+
+};
+let onEdge = index => {
+  return (i + 1) % (model.xAxisDivision + 1) === 0 || i % (model.xAxisDivision + 1) == 0 || i > (model.xAxisDivision + 1) * model.yAxisDivision - 1 || i < model.xAxisDivision + 1;
+};
+
+let getVertColor = index => {
+  return verts[index].color;
+};
+
+let rgbToHex = (r, g, b) => {
+  return (r << 16 | g << 8 | b).toString(16);
+};
+
+let getHighlightColor = (px, py) => {
+
+  px = px / window.innerWidth * (window.innerWidth / 4);
+  py = py / window.innerHeight * (window.innerHeight / 4);
+
+  if (px > gradientCanvas.width - 1) px = gradientCanvas.width - 1;
+  if (px < 1) px = 1;
+
+  if (py > gradientCanvas.height - 1) py = gradientCanvas.height - 1;
+  if (py < 1) py = 1;
+
+  var d = gradientContext.getImageData(px, py, 1, 1).data;
+  var hex = "#" + ("000000" + rgbToHex(d[0], d[1], d[2])).slice(-6);
+
+  return hex;
+};
+
+// configuration
+let init = () => {
+
+  console.log("Init");
+
+  //configDatGui(); //jack, enable this to modify colors and physics...
+  configPhysics();
+  configPaper();
+
+  // visual shit
+  plotGrid();
+  plotSegments();
+  plotTriangles();
+  renderParticles();
+  configPhysics();
+
+  // handle interaction events (this means hie ofc...)
+  document.addEventListener('mousemove', onDocumentMouseMove, false);
+  document.addEventListener('mousedown', onDocumentMouseDown, false);
+  document.addEventListener('mouseup', onDocumentMouseUp, false);
+  document.addEventListener('touchstart', onDocumentTouchStart, false);
+  document.addEventListener('touchmove', onDocumentTouchMove, false);
+
+  // handle resize events (i call it hre (i made that up (if youre reading this youre so gay bro)) 🐱‍👤)
+  //window.addEventListener( 'resize', onWindowResize, false );
+  view.onResize = onWindowResize;
+
+};
+
+let configDatGui = () => {
+  gui = new dat.GUI();
+
+
+  gui.addColor(model, "gradientBegin").onChange(function (val) {
+    updateGradient(val, model.gradientEnd);
+  });
+
+  gui.addColor(model, "gradientEnd").onChange(function (val) {
+    updateGradient(model.gradientBegin, val);
+  });
+
+  gui.addColor(model, "springColor").onChange(function (val) {
+
+    for (var i = 0; i < springs.length; i++) {
+
+      var s = springs[i];
+      s.strokeColor = val;
+    }
+
+  });
+
+  gui.add(model, "showSprings").onChange(function (val) {
+
+    for (var i = 0; i < springs.length; i++) {
+
+      var s = springs[i];
+      s.visible = val;
+    }
+
+  });
+
+  gui.add(model, "nodeMass").min(1).max(10).step(1).onChange(function (val) {
+
+
+    for (var i = 0; i < parts.length; i++) {
+
+      var p = parts[i];
+      p.setWeight(val);
+
+    }
+
+  });
+
+  gui.add(model, "nodeRadius").min(1).max(10).step(1).onChange(function (val) {
+
+    var r = model.lastNodeRadius;
+
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+
+
+
+      n.scale(val / r);
+
+    }
+
+    model.lastNodeRadius = val;
+
+  });
+
+  gui.addColor(model, "constraintColor").onChange(function (val) {
+
+    for (var i = 0; i < constraints.length; i++) {
+      var d = constraints[i];
+      d.fillColor = val;
+    }
+
+  });
+
+  gui.add(model, "constraintRadius").min(1).max(10).step(1).onChange(function (val) {
+
+    var r = model.lastConstraintRadius;
+
+    for (var i = 0; i < constraints.length; i++) {
+
+      var d = constraints[i];
+      d.scale(val / r);
+
+    }
+
+    model.lastConstraintRadius = val;
+
+  });
+
+  gui.add(model, "showConstraints").onChange(function (val) {
+
+    for (var i = 0; i < constraints.length; i++) {
+      var d = constraints[i];
+      d.visible = val;
+    }
+
+  });
+
+  gui.add(model, "springStrength").min(0).max(1).step(0.05).onChange(function (val) {
+
+    for (var i = 0; i < engine.springs.length; i++) {
+
+      var s = engine.springs[i];
+      s.setStrength(val);
+    }
+
+  });
+
+  gui.add(model, "springRestLength").min(0).max(100).step(1).onChange(function (val) {
+
+    for (var i = 0; i < engine.springs.length; i++) {
+
+      var s = engine.springs[i];
+      s.setRestLength(val);
+    }
+
+  });
+
+  gui.add(model, "proximityRadius").min(5).max(300).step(1);
+};
+
+let configCanvas = c => {
+  let bsr,dpr,ratio,ctx,vs = getViewportSize();
+
+  // fet the fucking devices pixel ratio falling back to 1
+  dpr = window.devicePixelRatio || 1;
+
+  // size * the device pixel ratio.
+  c.width = vs.width * dpr;
+  c.height = vs.height * dpr;
+  c.style.width = vs.width + "px";
+  c.style.height = vs.height + "px";
+
+  ctx = c.getContext('2d');
+  // scaling all operations by the dpr so you
+  // don't gotta worry about the difference
+  // ctx.scale(dpr, dpr);
+
+  return ctx;
+};
+
+let configPaper = () => {
+  let attr, gradient;
+
+  container = document.createElement('div');
+  document.body.appendChild(container);
+
+  attr = document.createAttribute("data-paper-resize");
+  attr.nodeValue = "true";
+
+  canvas = document.createElement("canvas");
+  canvas.id = "paperCanvas";
+
+  canvas.setAttributeNode(attr);
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  context = configCanvas(canvas);
+
+  gradientCanvas = document.createElement("canvas");
+  gradientCanvas.width = window.innerWidth;
+  gradientCanvas.height = window.innerHeight;
+  gradientContext = configCanvas(gradientCanvas);
+
+  gradient = gradientContext.createLinearGradient(0, 0, window.innerWidth / 4, window.innerHeight / 4);
+  gradient.addColorStop(0, model.quadAColor);
+  gradient.addColorStop(1, model.quadBColor);
+
+  gradientContext.fillStyle = gradient;
+  gradientContext.fillRect(0, 0, window.innerWidth / 4, window.innerHeight / 4);
+
+  container.appendChild(canvas);
+
+  paper.setup(canvas);
+  view = paper.view;
+
+
+  engine = new toxi.physics2d.VerletPhysics2D({ gravity: new toxi.geom.Vec2D(0, 0) });
+};
+
+let configPhysics = () => {
+  let i = 0;
+
+  for (i = 0; i < constraints.length; i++) {
+
+
+    let c = constraints[i];
+
+    let p = new toxi.physics2d.VerletParticle2D(c.position.x, c.position.y, model.particleMass); // particles
+    let a = new toxi.physics2d.VerletParticle2D(c.position.x, c.position.y, model.particleMass); // anchor
+    a.isLocked = true;
+
+    engine.addParticle(p);
+    engine.addParticle(a);
+
+    parts.push(p);
+    anchs.push(a);
+
+    let s = new toxi.physics2d.VerletConstrainedSpring2D(p, a, model.springRestLength, model.springStrength);
+    s.lockB();
+
+    engine.addSpring(s);
+
+  }
+};
+
+let plotGrid = () => {
+
+  let sx = 0,
+  sy = 0,
+  i = 0,
+  j = 0,
+  tx = gridX + 1,
+  ty = gridY + 1,
+  ix = window.innerWidth / gridX,
+  iy = window.innerHeight / gridY,
+  range = new toxi.color.ColorRange(new toxi.util.datatypes.FloatRange(0.5, 1.0));
+
+  for (i = 0; i < ty; i++) {
+
+    for (j = 0; j < tx; j++) {
+
+
+
+      verts.push({
+
+        vert: { row: sy + 1, col: sx + 1 },
+        color: model.baseColor,
+        highlight: getHighlightColor(sx, sy),
+        pos: new toxi.geom.Vec2D(sx, sy) });
+
+
+
+      let v = verts[verts.length - 1];
+      let anchor = new paper.Path.Circle(new paper.Point(v.pos.x, v.pos.y), 5);
+      anchor.fillColor = model.constraintColor;
+
+      constraints.push(anchor);
+
+      let spring = new paper.Path.Line({
+
+        from: [v.pos.x, v.pos.y],
+        to: [v.pos.x + 1, v.pos.y + 1],
+
+        strokeColor: model.springColor,
+        strokeWidth: 1 });
+
+
+
+      springs.push(spring);
+
+      sx += ix;
+
+    }
+
+    sx = (i + 1) % 2 === 0 ? 0 : -(ix / 2);
+    tx = (i + 1) % 2 === 0 ? gridX + 1 : gridX + 2;
+    sy += iy;
+
+  }
+};
+
+let plotSegments = () => {
+  let sx = 0,
+  sy = 0,
+  i = 0,
+  j = 0,
+  tx = gridX + 1,
+  ty = gridY + 1,
+  ix = window.innerWidth / gridX,
+  iy = window.innerHeight / gridY,
+  c = 0;
+
+
+  for (i = 0; i < ty; i++) {
+
+    for (j = 0; j < tx; j++) {
+
+
+      if (j == tx - 1) {
+
+        c++;
+        continue;
+      }
+
+      let l = new paper.Path.Line({
+
+        from: [verts[c].pos.x, verts[c].pos.y],
+        to: [verts[c + 1].pos.x, verts[c + 1].pos.y],
+
+        strokeColor: {
+          gradient: {
+            stops: [getVertColor(c), getVertColor(c + 1)] },
+
+
+          origin: [verts[c].pos.x, verts[c].pos.y],
+          destination: [verts[c + 1].pos.x, verts[c + 1].pos.y] },
+
+
+        strokeWidth: 1 });
+
+
+
+      segs.push({
+
+        fromIndex: c,
+        toIndex: c + 1,
+        line: l });
+
+
+
+      sx += ix;
+      c++;
+
+    }
+
+    sx = (i + 1) % 2 === 0 ? 0 : -(ix / 2);
+    tx = (i + 1) % 2 === 0 ? gridX + 1 : gridX + 2;
+    sy += iy;
+
+  }
+};
+
+let plotTriangles = () => {
+  var maxIndex = verts.length - (gridX + 2) - 1,
+  indexOne = 0,indexTwo = 1,
+
+  sx = 0,
+  sy = 0,
+  tx = gridX + 1,
+  ty = gridY + 1,
+  ix = window.innerWidth / gridX,
+  iy = window.innerHeight / gridY,
+  c = 0;
+
+
+  for (var i = 0; i < ty; i++) {
+
+    for (var j = 0; j < tx; j++) {
+
+      if (i == ty - 1) break;
+
+      if (j == tx) {
+
+        c++;
+        console.log("skip loop");
+        continue;
+      }
+
+      // drawing 2 segments
+
+
+      var l = 2;
+
+      if (i % 2 === 0) {
+        l = 2;
+      } else {
+        if (j === 0 || j === gridX + 1) {
+          l = 1;
+        }
+      }
+
+      var g = l < 2 && j == 0 ? c + gridX + 2 : c + gridX + 1;
+      g = l === 2 ? c + gridX + 1 : g;
+      var n = i % 2 === 0 ? c + tx : g; // next connection
+
+      for (var p = 0; p < l; p++) {
+
+        var col = p == 0 ? "#FF0000" : "#0000FF";
+
+        var ln = new paper.Path.Line({
+
+          from: [verts[c].pos.x, verts[c].pos.y],
+          to: [verts[n].pos.x, verts[n].pos.y],
+
+          strokeColor: {
+            gradient: {
+              stops: [getVertColor(c), getVertColor(n)] },
+
+
+            origin: [verts[c].pos.x, verts[c].pos.y],
+            destination: [verts[n].pos.x, verts[n].pos.y] },
+
+
+          strokeWidth: 1 });
+
+
+
+        segs.push({
+
+          fromIndex: c,
+          toIndex: n,
+          line: ln });
+
+
+
+        n++;
+      }
+
+      sx += ix;
+      c++;
+
+    }
+
+    sx = (i + 1) % 2 === 0 ? 0 : -(ix / 2);
+    tx = (i + 1) % 2 === 0 ? gridX + 1 : gridX + 2;
+    sy += iy;
+
+  }
+};
+
+// Events n shit
+let onWindowResize = event => {
+
+  let vd = getViewportSize();
+  viewWidth = vd.width;
+  viewHeight = vd.height;
+
+  windowHalfX = window.innerWidth / 2;
+  windowHalfY = window.innerHeight / 2;
+
+};
+
+let onDocumentMouseUp = event => {
+
+};
+
+let onDocumentMouseDown = event => {
+
+  //path.strokeColor.gradient.stops = [ "#FFFFFF", "#FF00FF"];
+  //plotNode( event.clientX, event.clientY );
+};
+
+let onDocumentMouseMove = event => {
+  mouseX = event.clientX; // - windowHalfX;
+  mouseY = event.clientY; // - windowHalfY;
+};
+
+let onDocumentTouchStart = event => {
+
+  if (event.touches.length > 1) {
+
+    event.preventDefault();
+
+    mouseX = event.touches[0].pageX - windowHalfX;
+    mouseY = event.touches[0].pageY - windowHalfY;
+
+  }
+};
+
+let onDocumentTouchMove = event => {
+
+  if (event.touches.length == 1) {
+
+    event.preventDefault();
+
+    mouseX = event.touches[0].pageX - windowHalfX;
+    mouseY = event.touches[0].pageY - windowHalfY;
+
+  }
+};
+
+// rpdates & render
+let update = () => {
+  let i = 0,s = segs.length;
+
+  // check mouse and apply force (this rhymes for some reason :3 )
+  for (i = 0; i < parts.length; i++) {
+
+    let p = parts[i];
+    let m = new toxi.geom.Vec2D(mouseX, mouseY);
+
+    if (m.distanceTo(p) < model.proximityRadius) {
+
+      verts[i].color = verts[i].highlight;
+      nodes[i].fillColor = verts[i].highlight;
+      p.addForce(m.subSelf(p).normalize().invert().scaleSelf(5));
+
+    } else {
+
+      verts[i].color = model.baseColor;
+      nodes[i].fillColor = verts[i].color;
+
+    }
+  }
+
+  engine.update();
+
+  for (i = 0; i < nodes.length; i++) {
+
+    nodes[i].position.x = parts[i].x;
+    nodes[i].position.y = parts[i].y;
+
+    springs[i].segments[0].point.x = anchs[i].x;
+    springs[i].segments[0].point.y = anchs[i].y;
+    springs[i].segments[1].point.x = parts[i].x;
+    springs[i].segments[1].point.y = parts[i].y;
+
+  }
+
+  // visual display shit
+  for (i = 0; i < segs.length; i++) {
+
+    let fromIndex = segs[i].fromIndex;
+    let toIndex = segs[i].toIndex;
+    let line = segs[i].line;
+
+    let p1 = nodes[fromIndex]; // particle circle ( Path.Circle )
+    let p2 = nodes[toIndex];
+
+    // segment endpoints 😮🔫
+    line.segments[0].point.x = p1.position.x;
+    line.segments[0].point.y = p1.position.y;
+
+    line.segments[1].point.x = p2.position.x;
+    line.segments[1].point.y = p2.position.y;
+
+    line.strokeColor = {
+      gradient: {
+        stops: [getVertColor(fromIndex), getVertColor(toIndex)] },
+
+
+      origin: [p1.position.x, p1.position.y],
+      destination: [p2.position.x, p2.position.y] };
+
+  }
+};
+
+let updateGradient = (begin, end) => {
+
+  let i;
+  let gradient = gradientContext.createLinearGradient(0, 0, window.innerWidth / 4, window.innerHeight / 4);
+  gradient.addColorStop(0, begin);
+  gradient.addColorStop(1, end);
+
+  gradientContext.fillStyle = gradient;
+  gradientContext.fillRect(0, 0, window.innerWidth / 4, window.innerHeight / 4);
+
+
+  for (i = 0; i < verts.length; i++) {
+    let v = verts[i];
+    v.highlight = getHighlightColor(v.pos.x, v.pos.y);
+  }
+
+};
+
+let render = () => {
+  view.draw();
+};
+
+let renderParticles = () => {
+  let i;
+  for (i = 0; i < verts.length; i++) {
+
+    var vert = verts[i];
+    var col = vert.color;
+
+    var cir = new paper.Path.Circle(new paper.Point(vert.pos.x, vert.pos.y), 3);
+    cir.fillColor = col;
+
+
+    nodes.push(cir);
+
+  }
+};
+
+let animate = () => {
+
+  update();
+  render();
+
+  requestAnimationFrame(animate);
+};
+
+window.onload = function () {
+  init();
+  animate();
+};
+
+})();
+    </script>
+
+    <div class="content">
+      <h1>Welcome</h1>
+      <h1>To</h1>
+      <h1>Ahdar</h1>
+    </div>
+
+  <style>
+    @import url("https://fonts.googleapis.com/css?family=Montserrat:900");
+body {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+}
+
+.content {
+  position: absolute;
+  top: -10%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+h1 {
+  margin: 0;
+  font-family: "Montserrat", sans-serif;
+  font-size: 20vh;
+  letter-spacing: 1vw;
+  position: absolute;
+  top: 15vh;
+  text-align: center;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  background: url("https://cdn.pixabay.com/photo/2020/08/31/20/22/abstract-5533509_960_720.png"); /* NOTE AT JACK: Use https://pixabay.com/images/search/gradient/ for best images.*/
+  background-size: auto 200%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shine 8s linear infinite;
+}
+h1:nth-child(2) {
+  margin-top: 250px;
+}
+h1:nth-child(3) {
+  margin-top: 500px;
+}
+@keyframes shine {
+  from {
+    background-position: center 0;
+  }
+  to {
+    background-position: center 200%;
+  }
+}
+  </style>
+</body>
+</html>
